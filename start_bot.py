@@ -1,7 +1,9 @@
+import asyncio
 import json
 import os
 import telebot
 import mysql.connector
+from asgiref.sync import sync_to_async
 from mysql.connector import Error
 from dotenv import load_dotenv
 
@@ -103,6 +105,7 @@ def auth(chat_id, student_id):
         print("Error while connecting to MySQL", e)
 
 
+@sync_to_async()
 def checkAuth(chat_id):
     global isAuth, user, my_cursor
     try:
@@ -150,6 +153,7 @@ def poll_updater(poll):
     connection.commit()
 
 
+@sync_to_async()
 def text_response(message):
     answer = message.text
     sql = f"SELECT * FROM webBot_textquestion where message_id = {message.reply_to_message.id}"
@@ -164,8 +168,12 @@ def text_response(message):
             bot.send_message(message.chat.id, "Question is already closed.")
 
 
+@sync_to_async
 def image_response(message):
-    image = message.photo[1]
+    if len(message.photo) == 1:
+        image = message.photo[1]
+    else:
+        image = message.photo[len(message.photo)-1]
     dictionary_img = {'file_id': image.file_id, 'file_size': image.file_size, 'file_unique_id': image.file_unique_id,
                       'height': image.height, 'width': image.width}
     print(image.file_id)
@@ -184,14 +192,14 @@ def image_response(message):
 @bot.message_handler(content_types=['image', 'photo'])
 def image_answer_handler(message):
     if message.reply_to_message is not None:
-        image_response(message)
+        asyncio.run(image_response(message))
 
 
 @bot.poll_handler(poll_updater)
 @bot.message_handler(content_types=['text'])
 def echo(message):
     global isAuth, isStart, isGroupSelected
-    checkAuth(message.chat.id)
+    asyncio.run(checkAuth(message.chat.id))
     if ((message.text == "/start") or (message.text == "/signup")) and not isAuth:
         isStart = True
         show_groups(message.chat.id)
@@ -214,7 +222,7 @@ def echo(message):
             isGroupSelected = False
     else:
         if message.reply_to_message is not None:
-            text_response(message)
+            asyncio.run(text_response(message))
 
 
 if __name__ == '__main__':
