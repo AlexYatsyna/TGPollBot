@@ -1,0 +1,24 @@
+{% extends 'main/base.html' %}
+
+{% block middle_body %}
+
+{% load crispy_forms_tags %}
+
+<br><br>
+<h1 align="center">{{tittle}}</h1>
+<form method="POST" class="post-form" style="text-align: center;">
+    {% csrf_token %}
+    {{ form | crispy}}
+    <br>
+
+<button type="submit" class="save btn btn-default"><h4>Submit</h4></button>
+    <h1 align="center">{{message}}</h1>
+</form>
+
+{% for string in list %}
+    <h5 align="center">{{string}}</h5>
+{% endfor %}
+
+
+
+{% endblock %}
