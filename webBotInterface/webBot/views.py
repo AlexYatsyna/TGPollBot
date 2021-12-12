@@ -104,7 +104,10 @@ def close_survey(request):
                     questions = SimplePoll.objects.filter(question_group=question_group)
                     for question in questions:
                         if not question.is_closed:
-                            bot.stop_poll(question.user_id.tg_chat_id, question.poll_id)
+                            try:
+                                bot.stop_poll(question.user_id.tg_chat_id, question.poll_id)
+                            except:
+                                continue
                     questions.update(is_closed=True)
                 return redirect('home')
         else:
@@ -213,7 +216,7 @@ def survey_results(request):
                                         wr_ans += 1
                                 result.append(
                                     f"{user.student_id.last_name} {user.student_id.first_name} {cor_ans}/{cor_ans + wr_ans}")
-                                return render(request, 'main/results.html',
+                            return render(request, 'main/results.html',
                                               {'list': result})
                         else:
                             return render(request, 'main/results.html',

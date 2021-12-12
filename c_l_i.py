@@ -1,20 +1,15 @@
 import json
 import os
-from mysql.connector import Error
-import mysql.connector
 import telebot
 import typer
+import aiomysql
+import asyncio
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 
 app = typer.Typer()
 load_dotenv()
 bot = telebot.TeleBot(os.getenv("BOT_TOKEN"))
-connection = mysql.connector.connect(host=os.getenv("DB_HOST"),
-                                     database=os.getenv("DB_NAME"),
-                                     user=os.getenv("DB_USER"),
-                                     password=os.getenv("DB_PASSWORD"))
-my_cursor = connection.cursor()
 
 
 @app.command()
@@ -31,16 +26,32 @@ def send_poll(question_group: int = typer.Option(..., help="It should be integer
     """
         ---- Send poll ----
     """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(send_poll_async(loop, question_group, question_number, question_text, option_1,
+                                            option_2, option_3, option_4, option_5, correct_option, open_time))
+
+
+async def send_poll_async(loop, question_group, question_number, question_text, option_1,
+                          option_2, option_3, option_4, option_5, correct_option, open_time):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
     options = json.dumps([option_1, option_2, option_3, option_4, option_5])
     if question_number > 0 and question_group > 0:
-        sql = f"SELECT * FROM webBot_simplepoll where question_group = {question_group} and question_number= {question_number}"
-        my_cursor.execute(sql)
-        polls = my_cursor.fetchall()
+        sql = f"SELECT * FROM webBot_simplepoll where question_group = {question_group} and question_number= {question_number} "
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                polls = await cur.fetchall()
 
         if len(polls) == 0:
             sql = "SELECT * FROM webBot_chatuser"
-            my_cursor.execute(sql)
-            users = my_cursor.fetchall()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql)
+                    users = await cur.fetchall()
+
             if question_number > 0 and question_group > 0 and 0 <= correct_option < 5 and open_time > 0:
                 for user in users:
                     current_poll = bot.send_poll(user[1], question_text,
@@ -53,15 +64,21 @@ def send_poll(question_group: int = typer.Option(..., help="It should be integer
                           "user_id_id, user_choice, is_closed, question_number) " \
                           "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                     val = [current_poll.poll.id, current_poll.id, question_group, question_text,
-                           options, correct_option - 1, open_time, user[0], -1, False, question_number]
-                    my_cursor.execute(sql, val)
-                    connection.commit()
+                           options, correct_option, open_time, user[0], -1, False, question_number]
+                    async with pool.acquire() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute(sql, val)
+                            await conn.commit()
+
             else:
                 print("Invalid input.")
         else:
             print("This question number exists in this question group")
     else:
         print("Invalid data.")
+
+    pool.close()
+    await pool.wait_closed()
 
 
 @app.command()
@@ -70,11 +87,27 @@ def close_poll(chat_id: int = typer.Option(..., help="User chat id"),
     """
         ---- Close poll for one user ----
     """
-    message = bot.stop_poll(chat_id, message_id)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(close_poll_async(loop, chat_id, message_id))
+
+
+async def close_poll_async(loop, chat_id, message_id):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+    try:
+        message = bot.stop_poll(chat_id, message_id)
+    except:
+        print()
 
     sql = f"UPDATE webBot_simplepoll SET is_closed = {int(1)} WHERE poll_id = {message_id}"
-    my_cursor.execute(sql)
-    connection.commit()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql)
+            await conn.commit()
+
+    pool.close()
+    await pool.wait_closed()
 
 
 @app.command()
@@ -84,10 +117,24 @@ def add_group(group_number: str = typer.Option(..., help="Group number"),
     """
         ---- Add group ----
     """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(add_group_async(loop, group_number, group_course, students))
+
+
+async def add_group_async(loop, group_number, group_course, students):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
     sql = "INSERT INTO webBot_group  (group_number, group_course, number_of_students) VALUES (%s, %s, %s)"
     val = [group_number, group_course, students]
-    my_cursor.execute(sql, val)
-    connection.commit()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql, val)
+            await conn.commit()
+
+    pool.close()
+    await pool.wait_closed()
 
 
 @app.command()
@@ -98,21 +145,39 @@ def add_student(f_n: str = typer.Option(..., help="First name"),
     """
         ---- Add student ----
     """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(add_student_async(loop, f_n, l_n, gr_num, l_num))
+
+
+async def add_student_async(loop, f_n, l_n, gr_num, l_num):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
     sql = f"SELECT * FROM webBot_group where group_number = {gr_num}"
-    my_cursor.execute(sql)
-    group = my_cursor.fetchall()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql)
+            group = await cur.fetchall()
+
     if len(group) > 0:
         group = group[0]
     else:
+        pool.close()
+        await pool.wait_closed()
         print("There is no such group.")
         return
 
     if 0 < l_num < group[3]:
         sql = "INSERT INTO webBot_student  (first_name, last_name, group_id_id, list_number) VALUES (%s, %s, %s, %s)"
         val = [f_n, l_n, group[0], l_num]
-        my_cursor.execute(sql, val)
-        connection.commit()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, val)
+                await conn.commit()
     else:
+        pool.close()
+        await pool.wait_closed()
         print("Invalid list number")
         return
 
@@ -122,22 +187,42 @@ def delete_group(gr_num: str = typer.Option(..., help="Group number")):
     """
         ---- Delete group ----
     """
-    try:
-        sql = f"SELECT * FROM webBot_group where group_number = {gr_num}"
-        my_cursor.execute(sql)
-        group = my_cursor.fetchall()
-        if len(group) > 0:
-            sql = f"DELETE FROM webBot_student WHERE group_id_id = {group[0][0]}"
-            my_cursor.execute(sql)
-            connection.commit()
-            sql = f"DELETE FROM webBot_group WHERE group_number = {gr_num}"
-            my_cursor.execute(sql)
-            connection.commit()
-        else:
-            print(f"There isn't group. Try again.")
-            return
-    except Error as e:
-        print(f"Error {e}")
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(delete_group_async(loop, gr_num))
+
+
+async def delete_group_async(loop, gr_num):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
+    sql = f"SELECT * FROM webBot_group where group_number = {gr_num}"
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql)
+            group = await cur.fetchall()
+
+    if len(group) > 0:
+        sql = f"DELETE FROM webBot_student WHERE group_id_id = {group[0][0]}"
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                await conn.commit()
+
+        sql = f"DELETE FROM webBot_group WHERE group_number = {gr_num}"
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                await conn.commit()
+
+        pool.close()
+        await pool.wait_closed()
+
+    else:
+        pool.close()
+        await pool.wait_closed()
+        print(f"There isn't group. Try again.")
+        return
 
 
 @app.command()
@@ -147,26 +232,47 @@ def delete_student(l_n: str = typer.Option(..., help="Last name"),
     """
         ---- Delete student ----
     """
-    try:
-        sql = f"SELECT * FROM webBot_group where group_number = {gr_num}"
-        my_cursor.execute(sql)
-        group = my_cursor.fetchall()
-        if len(group) > 0:
-            sql = f"SELECT * FROM webBot_student WHERE last_name = '{l_n}'"
-            my_cursor.execute(sql)
-            student = my_cursor.fetchall()
-            if len(student) > 0:
-                sql = f"DELETE FROM webBot_student WHERE group_id_id = {group[0][0]} and " \
-                      f"list_number = {l_num} "
-                my_cursor.execute(sql)
-                connection.commit()
-            else:
-                print(f"There's no such student. Try again.")
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(delete_student_async(loop, l_n, gr_num, l_num))
+
+
+async def delete_student_async(loop, l_n, gr_num, l_num):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
+    sql = f"SELECT * FROM webBot_group where group_number = {gr_num}"
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql)
+            group = await cur.fetchall()
+
+    if len(group) > 0:
+        sql = f"SELECT * FROM webBot_student WHERE last_name = '{l_n}'"
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                student = await cur.fetchall()
+
+        if len(student) > 0:
+            sql = f"DELETE FROM webBot_student WHERE group_id_id = {group[0][0]} and " \
+                  f"list_number = {l_num} "
+
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql)
+                    await conn.commit()
+
         else:
-            print(f"There isn't group. Try again.")
-            return
-    except Error as e:
-        print(f"Error {e}")
+            print(f"There's no such student. Try again.")
+
+        pool.close()
+        await pool.wait_closed()
+    else:
+        pool.close()
+        await pool.wait_closed()
+        print(f"There isn't group. Try again.")
+        return
 
 
 @app.command()
@@ -174,18 +280,41 @@ def delete_chat_user(chat_id: int = typer.Option(..., help="User chat id")):
     """
         ---- Delete user ----
     """
-    try:
-        sql = f"SELECT * FROM webBot_chatuser WHERE tg_chat_id = {chat_id}"
-        my_cursor.execute(sql)
-        user = my_cursor.fetchall()
-        if len(user) > 0:
-            sql = f"DELETE FROM webBot_chatuser WHERE tg_chat_id = {chat_id}"
-            my_cursor.execute(sql)
-            connection.commit()
-        else:
-            print(f"There's no such chat-user. Try again.")
-    except Error as e:
-        print(f"Error {e}")
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(delete_chat_user_async(loop, chat_id))
+
+
+async def delete_chat_user_async(loop, chat_id):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
+    sql = f"SELECT * FROM webBot_chatuser WHERE tg_chat_id = {chat_id}"
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql)
+            user = await cur.fetchall()
+
+    if len(user) > 0:
+        sql = f"DELETE FROM webBot_chatuser WHERE tg_chat_id = {chat_id}"
+
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                await conn.commit()
+
+        sql = f"DELETE FROM webBot_registrationstate WHERE tg_chat_id = {chat_id}"
+
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                await conn.commit()
+
+    else:
+        print(f"There's no such chat-user. Try again.")
+
+    pool.close()
+    await pool.wait_closed()
 
 
 @app.command()
@@ -193,20 +322,41 @@ def close_question_group(q_gr: int = typer.Option(..., help="Question group")):
     """
         ---- Close question group ----
     """
-    try:
-        sql = f"SELECT * FROM webBot_simplepoll where question_group = {q_gr}"
-        my_cursor.execute(sql)
-        questions = my_cursor.fetchall()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(close_question_group_async(loop, q_gr))
 
-        for question in questions:
-            if question[10] == 0:
-                sql = f"SELECT * FROM webBot_chatuser WHERE id = {question[9]}"
-                my_cursor.execute(sql)
-                user = my_cursor.fetchall()
-                close_poll(user[0][1], question[2])
 
-    except Error as e:
-        print(f"Error {e}")
+async def close_question_group_async(loop, q_gr):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
+    sql = f"SELECT * FROM webBot_simplepoll where question_group = {q_gr}"
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql)
+            questions = await cur.fetchall()
+
+    for question in questions:
+        if question[10] == 0:
+            sql = f"SELECT * FROM webBot_chatuser WHERE id = {question[9]}"
+
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql)
+                    user = await cur.fetchall()
+
+            message = bot.stop_poll(user[0][1], question[2])
+
+            sql = f"UPDATE webBot_simplepoll SET is_closed = {int(1)} WHERE poll_id = {question[2]}"
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql)
+                    await conn.commit()
+
+    pool.close()
+    await pool.wait_closed()
 
 
 @app.command()
@@ -215,15 +365,29 @@ def get_question_result(q_gr: int = typer.Option(..., help="Question group"),
     """
     ---- Get histogram for one question , question should be closed ----
     """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(get_question_result_async(loop, q_gr, q_num))
+
+
+async def get_question_result_async(loop, q_gr, q_num):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
     if q_gr > 0 and q_num > 0:
         correct_answer = [0, 0, 0, 0, 0]
         wrong_answer = [0, 0, 0, 0, 0]
         sql = f"SELECT * FROM webBot_simplepoll where question_group = {q_gr} and question_number= {q_num}"
-        my_cursor.execute(sql)
-        questions = my_cursor.fetchall()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                questions = await cur.fetchall()
+
         sql = f"SELECT id FROM webBot_chatuser "
-        my_cursor.execute(sql)
-        users = my_cursor.fetchall()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                users = await cur.fetchall()
 
         total_ans = len(users)
         if total_ans == 0:
@@ -256,6 +420,9 @@ def get_question_result(q_gr: int = typer.Option(..., help="Question group"),
     else:
         print("There's no such question group or question number. Try again.")
 
+    pool.close()
+    await pool.wait_closed()
+
 
 @app.command()
 def send_text_question(question: str = typer.Option(..., help="Question text"),
@@ -263,15 +430,28 @@ def send_text_question(question: str = typer.Option(..., help="Question text"),
     """
     ---- Send text question ----
     """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(send_text_question_async(loop, question, q_num))
+
+
+async def send_text_question_async(loop, question, q_num):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
     if q_num > 0:
         sql = f"SELECT * FROM webBot_textquestion where question_number= {q_num}"
-        my_cursor.execute(sql)
-        t_question = my_cursor.fetchall()
+
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                t_question = await cur.fetchall()
 
         if len(t_question) == 0:
             sql = "SELECT * FROM webBot_chatuser"
-            my_cursor.execute(sql)
-            users = my_cursor.fetchall()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql)
+                    users = await cur.fetchall()
 
             for user in users:
                 current_question = bot.send_message(user[1], question)
@@ -279,12 +459,18 @@ def send_text_question(question: str = typer.Option(..., help="Question text"),
                       "(message_id, question, question_number,user_id_id, user_answer, user_image, is_closed) " \
                       "VALUES (%s, %s, %s, %s, %s, %s, %s)"
                 val = [current_question.id, question, q_num, user[0], "", "", False]
-                my_cursor.execute(sql, val)
-                connection.commit()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql, val)
+                        await conn.commit()
+
         else:
             print("This question number exist.")
     else:
         print("Invalid data.")
+
+    pool.close()
+    await pool.wait_closed()
 
 
 @app.command()
@@ -292,20 +478,36 @@ def close_text_question(q_num: int = typer.Option(..., help="The number of the q
     """
     ---- Close text question ----
     """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(close_text_question_async(loop, q_num))
+
+
+async def close_text_question_async(loop, q_num):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
     if q_num > 0:
         sql = f"SELECT * FROM webBot_textquestion where question_number = {q_num} and is_closed = {0}"
-        my_cursor.execute(sql)
-        questions = my_cursor.fetchall()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                questions = await cur.fetchall()
 
         if len(questions) > 0:
             for question in questions:
                 sql = f"UPDATE webBot_textquestion SET is_closed = {1} WHERE id = {question[0]}"
-                my_cursor.execute(sql)
-                connection.commit()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql)
+                        await conn.commit()
+
         else:
             print("There's no such question number. Try again.")
     else:
         print("Invalid data.")
+
+    pool.close()
+    await pool.wait_closed()
 
 
 @app.command()
@@ -313,22 +515,41 @@ def get_result_question_group(q_gr: int = typer.Option(..., help="Question group
     """
     ---- Simple question group results ----
     """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(get_result_question_group_async(loop, q_gr))
+
+
+async def get_result_question_group_async(loop, q_gr):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
     if q_gr > 0:
         result = []
         sql = "SELECT * FROM webBot_chatuser"
-        my_cursor.execute(sql)
-        users = my_cursor.fetchall()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                users = await cur.fetchall()
 
         if len(users) > 0:
             for user in users:
                 sql = f"SELECT * FROM webBot_student where id = {user[2]}"
-                my_cursor.execute(sql)
-                student = my_cursor.fetchall()[0]
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql)
+                        student = await cur.fetchall()
+
+                student = student[0]
 
                 sql = f"SELECT correct_option, user_choice, is_closed FROM webBot_simplepoll where user_id_id = {user[0]}" \
                       f" and question_group = {q_gr} "
-                my_cursor.execute(sql)
-                res = my_cursor.fetchall()
+
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql)
+                        res = await cur.fetchall()
+
                 cor_ans = 0
                 wr_ans = 0
 
@@ -345,31 +566,52 @@ def get_result_question_group(q_gr: int = typer.Option(..., help="Question group
     else:
         print("Invalid data.")
 
+    pool.close()
+    await pool.wait_closed()
+
 
 @app.command()
 def get_text_question_result(q_num: int = typer.Option(..., help="Question number")):
     """
     ---- Download the result of the text question ----
     """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(get_text_question_result_async(loop, q_num))
+
+
+async def get_text_question_result_async(loop, q_num):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
     if q_num > 0:
         current_path = os.getcwd()
         current_path += "/results/"
         sql = "SELECT * FROM webBot_chatuser"
-        my_cursor.execute(sql)
-        users = my_cursor.fetchall()
+
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql)
+                users = await cur.fetchall()
 
         if len(users) > 0:
             for user in users:
 
                 sql = f"SELECT first_name, last_name, group_number FROM webBot_student left join webBot_group on " \
                       f"webBot_student.group_id_id = webBot_group.id where webBot_student.id = {user[2]} "
-                my_cursor.execute(sql)
-                student = my_cursor.fetchall()[0]
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql)
+                        student = await cur.fetchall()
+
+                student = student[0]
 
                 sql = f"SELECT user_answer, user_image, is_closed, question FROM webBot_textquestion where user_id_id = {user[0]}" \
                       f" and question_number = {q_num}"
-                my_cursor.execute(sql)
-                questions = my_cursor.fetchall()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql)
+                        questions = await cur.fetchall()
 
                 target_path = f"{student[2]}/{student[1]} {student[0]}/"
                 directory = current_path + target_path
@@ -395,6 +637,9 @@ def get_text_question_result(q_num: int = typer.Option(..., help="Question numbe
             print("There aren't students.")
     else:
         print("Invalid question number.")
+
+    pool.close()
+    await pool.wait_closed()
 
 
 if __name__ == '__main__':

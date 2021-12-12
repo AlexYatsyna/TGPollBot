@@ -45,6 +45,14 @@ class SimplePoll(models.Model):
         return f"Question from poll {self.question_group} number {self.question_number} for {self.user_id}"
 
 
+class RegistrationState(models.Model):
+    tg_chat_id = models.IntegerField()
+    registration_state = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.tg_chat_id}"
+
+
 class TextQuestion(models.Model):
     message_id = models.BigIntegerField()
     question = models.CharField(max_length=255)
