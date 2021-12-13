@@ -31,8 +31,6 @@ async def show_groups(chat_id, loop):
     answ = "Choose your group:\n"
 
     for item in groups:
-        if item[1] == "000000":
-            continue
         answ += str(item[0]) + ". " + item[1] + "\n"
 
     bot.send_message(chat_id, answ)
@@ -62,7 +60,7 @@ async def show_students(chat_id, group_id, loop):
 
         return True
     else:
-        bot.send_message(chat_id, "Wrong group selected. Try again")
+        bot.send_message(chat_id, "Something happened. Try again (write /start)")
         return False
 
 
@@ -109,7 +107,7 @@ async def auth(chat_id, student_id, loop):
     else:
         pool.close()
         await pool.wait_closed()
-        bot.send_message(chat_id, "Wrong student selected. Try again")
+        bot.send_message(chat_id, "Something happened. Try again (write /start)")
         return None
 
 
@@ -287,20 +285,55 @@ def get_state(chat_id):
     return state
 
 
+async def check_user(loop, chat_id):
+    pool = await aiomysql.create_pool(host=os.getenv("DB_HOST"),
+                                      user=os.getenv("DB_USER"),
+                                      password=os.getenv("DB_PASSWORD"), db=os.getenv("DB_NAME"), loop=loop)
+
+    sql = f"SELECT * FROM webBot_chatuser where tg_chat_id = {chat_id}"
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql)
+            chat_user = await cur.fetchall()
+
+    if len(chat_user) == 0 or chat_user is None:
+        pool.close()
+        await pool.wait_closed()
+        return False
+
+    pool.close()
+    await pool.wait_closed()
+    return True
+
+
 @bot.poll_handler(process_poll)
 @bot.message_handler(content_types=['text'])
 def echo(message):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
     current_state = get_state(message.chat.id)
     if current_state is not None:
         current_state = current_state[0]
-    if message.text == "/start" and (current_state is None or current_state == -1):
+
+    if message.text == "/start" and (current_state is None or current_state == -1 or current_state == 2):
+
+        current_flag = loop.run_until_complete(check_user(loop, message.chat.id))
+        if current_flag is False and current_state == 2:
+            loop.run_until_complete(set_current_state(message.chat.id, -1, 'group_selected', loop))
+            current_state = -1
+        elif current_flag is True:
+            bot.send_message(message.chat.id, "You're already sign in")
+            return
+
         if current_state is None:
             loop.run_until_complete(set_current_state(message.chat.id, 0, 'start', loop))
-        else:
+        elif current_state == -1:
             loop.run_until_complete(set_current_state(message.chat.id, 0, 'group_selected', loop))
+
         loop.run_until_complete(show_groups(message.chat.id, loop))
+        return
 
     if current_state == 0:
         if message.text.isdigit() and 0 < int(message.text):
@@ -310,7 +343,8 @@ def echo(message):
                 loop.run_until_complete(set_current_state(message.chat.id, -1, 'group_selected', loop))
         else:
             loop.run_until_complete(set_current_state(message.chat.id, -1, 'group_selected', loop))
-            bot.send_message(message.chat.id, "Invalid group, try again")
+            bot.send_message(message.chat.id, "Something happened. Try again (write /start)")
+        return
 
     if current_state == 1:
         if message.text.isdigit() and 0 < int(message.text):
@@ -322,7 +356,8 @@ def echo(message):
                 loop.run_until_complete(set_current_state(message.chat.id, -1, 'group_selected', loop))
         else:
             loop.run_until_complete(set_current_state(message.chat.id, -1, 'group_selected', loop))
-            bot.send_message(message.chat.id, "Invalid student number, try again")
+            bot.send_message(message.chat.id, "Something happened. Try again (write /start)")
+        return
 
     if message.reply_to_message is not None:
         loop.run_until_complete(text_response(message, loop))

@@ -316,7 +316,7 @@ def get_text_result(request):
                                    'message': "Question number doesn't exist"})
                 else:
                     current_path = os.path.abspath(os.path.dirname(__name__))
-                    current_path += "_results/"
+                    current_path += "/results/"
 
                     users = ChatUser.objects.all()
                     for user in users:
