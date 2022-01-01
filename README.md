@@ -1,4 +1,4 @@
-**Service for conducting surveys during classes.**
+# Service for conducting surveys during classes.
 
 There are two ways to interact with bot users:
   ```
